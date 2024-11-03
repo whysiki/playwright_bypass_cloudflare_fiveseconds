@@ -1,8 +1,7 @@
 import re
 import cv2
 import numpy as np
-from playwright.sync_api import Playwright, sync_playwright, Page, Browser
-from playwright.async_api import async_playwright
+from playwright.sync_api import sync_playwright, Browser
 import playwright.async_api
 from PIL import Image
 import random
@@ -11,7 +10,6 @@ from pathlib import Path
 from bs4 import BeautifulSoup
 from rich import print
 import pyautogui
-import asyncio
 
 current_file_path = Path(__file__).resolve().parent
 cache_path = current_file_path / "cache"
@@ -40,9 +38,7 @@ def is_page_unblocked(text: str) -> bool:
 def remove_right_white_background(image_path: str, output_path: str) -> None:
     image = Image.open(image_path).convert("RGBA")
     data = np.array(image)
-
     non_white_mask = np.all(data[:, :, :3] <= 210, axis=-1)
-
     if np.any(non_white_mask):
         right_bound = np.max(np.where(non_white_mask)[1]) + 1
     else:
@@ -74,9 +70,9 @@ def bypass_cloudflare(browser: Browser, url: str) -> None:
                 print("security check div_element found")
                 bounding_box = div_element.bounding_box()
                 if bounding_box:
-                    width = bounding_box["width"]
-                    height = bounding_box["height"]
-                    if width > 0 and height > 0:
+                    div_width = bounding_box["width"]
+                    div_height = bounding_box["height"]
+                    if div_width > 0 and div_height > 0:
                         print("security check div_element width and height > 0, loaded")
                         div_element.screenshot(path=div_screenshot_path)
                         print(f"div_screenshot_path: {div_screenshot_path}")
@@ -93,40 +89,36 @@ def bypass_cloudflare(browser: Browser, url: str) -> None:
                         div_screenshot_no_white_ndarray = cv2.imread(
                             div_screenshot_no_white_path, cv2.IMREAD_GRAYSCALE
                         )
-                        result = cv2.matchTemplate(
+                        match_result_square_in_div = cv2.matchTemplate(
                             div_screenshot_no_white_ndarray,
                             square_template_ndarray,
                             cv2.TM_CCOEFF_NORMED,
                         )
-                        threshold = 0.5
-                        loc_div = np.where(result >= threshold)
+                        loc_div = np.where(match_result_square_in_div >= 0.5)
                         if len(loc_div[0]) > 2:
                             print("checkbox found in security check div_element")
                             average_loc_squareIn_div = np.mean(loc_div, axis=1)
                             pyautogui.screenshot(screen_path)
                             print(f"full screen screenshot path: {screen_path}")
-                            full_screen_shot = cv2.imread(
+                            full_screen_shot_ndarray = cv2.imread(
                                 screen_path, cv2.IMREAD_GRAYSCALE
                             )
-                            result = cv2.matchTemplate(
-                                full_screen_shot,
+                            match_result_div_in_screen = cv2.matchTemplate(
+                                full_screen_shot_ndarray,
                                 div_screenshot_no_white_ndarray,
                                 cv2.TM_CCOEFF_NORMED,
                             )
-                            threshold = 0.6
-                            loc_screen = np.where(result >= threshold)
+                            loc_screen = np.where(match_result_div_in_screen >= 0.6)
                             if len(loc_screen[0]) > 2:
                                 print("security check div_element found in screen")
                                 average_loc_divIn_screen = np.mean(loc_screen, axis=1)
-                                screen_x = average_loc_divIn_screen[
-                                    0
-                                ]  # div在屏幕截图中的位置
+                                screen_x = average_loc_divIn_screen[0]
                                 screen_y = average_loc_divIn_screen[1]
                                 result_x = (
                                     screen_x
                                     + average_loc_squareIn_div[0]
                                     + square_template_ndarray.shape[0] // 6
-                                )  # square在屏幕截图中的位置
+                                )
                                 result_y = (
                                     screen_y
                                     + average_loc_squareIn_div[1]
@@ -157,12 +149,3 @@ if __name__ == "__main__":
     with sync_playwright() as playwright:
         with playwright.firefox.launch(headless=False) as browser:
             bypass_cloudflare(browser, "https://cn.investing.com/")
-
-    # async def main():
-    #     async with async_playwright() as playwright:
-    #         browser = await playwright.firefox.launch(headless=False)
-    #         await bypass_cloudflare_async(
-    #             browser, "https://cn.investing.com/", max_time=60
-    #         )
-
-    # asyncio.run(main())
